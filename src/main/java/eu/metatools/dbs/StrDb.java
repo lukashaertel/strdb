@@ -244,7 +244,8 @@ public class StrDb {
                 }
             } else {
                 // Get the entry that starts with the prefix of the word
-                ZipEntry entry = zipFile.getEntry(word.substring(0, prefixLength).toLowerCase());
+                ZipEntry entry = zipFile.getEntry(
+                        basePath + word.substring(0, prefixLength).toLowerCase());
 
                 // No file with this prefix, so the word is not in the database.
                 if (entry == null)

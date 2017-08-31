@@ -174,13 +174,48 @@ public class StrDb {
     }
 
     /**
-     * Checks if the word is in the database.
+     * Returns true if the word in any casing is contained in the database.
      *
      * @param word The word to look for.
      * @return Returns true if the word is contained.
      * @throws IOException Thrown from the underlying implementations.
      */
     public boolean contains(String word) throws IOException {
+        return resolve(word, false) != null;
+    }
+
+    /**
+     * Returns true if the word is contained in the database, respects casing if required.
+     *
+     * @param word      The word to look for.
+     * @param matchCase True if casing is to be acknowledged.
+     * @return Returns true if the word is contained.
+     * @throws IOException Thrown from the underlying implementations.
+     */
+    public boolean contains(String word, boolean matchCase) throws IOException {
+        return resolve(word, matchCase) != null;
+    }
+
+    /**
+     * Gets the word in the database that matches the given word in any casing.
+     *
+     * @param word The word to look for.
+     * @return Returns The word in the actual casing.
+     * @throws IOException Thrown from the underlying implementations.
+     */
+    public String resolve(String word) throws IOException {
+        return resolve(word, false);
+    }
+
+    /**
+     * Gets the word in the database that matches the given word. If match case is false, the word with the correct
+     * casing is returned. If no word is present, null is returned.
+     *
+     * @param word The word to look for.
+     * @return Returns The word in the actual casing.
+     * @throws IOException Thrown from the underlying implementations.
+     */
+    public String resolve(String word, boolean matchCase) throws IOException {
         // Open the ZIP file for the items.
         try (ZipFile zipFile = new ZipFile(file, Charsets.UTF_8)) {
             if (word.length() < prefixLength) {
@@ -197,17 +232,23 @@ public class StrDb {
                     // Read all lines, check if word is equal.
                     String line;
                     while ((line = reader.readLine()) != null)
-                        if (line.equals(word))
-                            return true;
-                    return false;
+                        if (matchCase) {
+                            if (line.equals(word))
+                                return line;
+                        } else {
+                            if (line.toLowerCase().equals(word.toLowerCase()))
+                                return line;
+                        }
+
+                    return null;
                 }
             } else {
                 // Get the entry that starts with the prefix of the word
-                ZipEntry entry = zipFile.getEntry(word.substring(0, prefixLength));
+                ZipEntry entry = zipFile.getEntry(word.substring(0, prefixLength).toLowerCase());
 
                 // No file with this prefix, so the word is not in the database.
                 if (entry == null)
-                    return false;
+                    return null;
 
                 // Open reader on the entry
                 try (BufferedReader reader = new ByteSource() {
@@ -219,9 +260,15 @@ public class StrDb {
                     // Read all lines, check if word is equal.
                     String line;
                     while ((line = reader.readLine()) != null)
-                        if (line.equals(word))
-                            return true;
-                    return false;
+                        if (matchCase) {
+                            if (line.equals(word))
+                                return line;
+                        } else {
+                            if (line.toLowerCase().equals(word.toLowerCase()))
+                                return line;
+                        }
+
+                    return null;
                 }
             }
         }

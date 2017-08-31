@@ -16,7 +16,7 @@ public class Processor {
     }
 
     private static void transform(String file) throws IOException {
-        int length = 3;
+        int length = Config.prefixLength;
         String prefix = null;
 
         Writer writer = null;
@@ -34,7 +34,7 @@ public class Processor {
                         shortWords.add(word);
                     else {
                         if (prefix == null || !word.startsWith(prefix)) {
-                            prefix = word.substring(0, Math.min(length, word.length()));
+                            prefix = word.substring(0, Math.min(length, word.length())).toLowerCase();
                             if (writer != null)
                                 writer.close();
 

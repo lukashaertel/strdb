@@ -3,6 +3,7 @@ package eu.metatools.dbs;
 import java.io.File;
 import java.io.IOException;
 import java.util.Random;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 
@@ -226,16 +227,17 @@ public class Tests {
         for (int i = 0; i < tests.length; i++)
             tests2[i] = scramble(tests[i]);
 
-        StrDb strDb = new StrDb(new File("english_words_all.zip"), "english_words_all/", 3);
+        StrDb strDb = new StrDb(new File("english_words_all.zip"), "english_words_all/", Config.prefixLength);
 
         long bn = System.nanoTime();
 
-        System.out.println(strDb.where(new Predicate<String>() {
+        strDb.words(new Consumer<String>() {
             @Override
-            public boolean test(String s) {
-                return s.contains("oo");
+            public void accept(String s) {
+                if (s.contains("oo"))
+                    System.out.println(s);
             }
-        }));
+        });
 
         long en = System.nanoTime();
 

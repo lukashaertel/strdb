@@ -1,28 +1,26 @@
 package eu.metatools.dbs;
 
-import com.google.common.base.Charsets;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.hash.BloomFilter;
-import com.google.common.hash.Funnels;
 import com.google.common.io.ByteSource;
-import com.google.common.io.CharSource;
-import com.google.common.io.Files;
 import com.google.common.io.LineProcessor;
 
-import java.io.*;
-import java.util.Enumeration;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
-import java.util.zip.GZIPInputStream;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 public class StrDb {
+    private Map<String, Integer> index;
+
     /**
-     * The ZIP file containing the prefixes.
+     * The byte source containing the prefixes.
      */
-    private final File file;
+    private final ByteSource source;
 
     /**
      * The base path within the ZIP file.
@@ -35,17 +33,42 @@ public class StrDb {
     private final int prefixLength;
 
     /**
+     * The charset to use for the database.
+     */
+    private final Charset charset;
+
+    /**
      * Constructs the string DB.
      *
-     * @param file         The ZIP file containing the prefixes.
+     * @param source       The byte source containing the prefixes.
      * @param basePath     The base path within the ZIP file.
      * @param prefixLength The length of the prefix.
+     * @param charset      The charset to use for the database.
      */
-    public StrDb(File file, String basePath, int prefixLength) {
+    public StrDb(ByteSource source, String basePath, int prefixLength, Charset charset) {
 
-        this.file = file;
+        this.source = source;
         this.basePath = basePath;
         this.prefixLength = prefixLength;
+        this.charset = charset;
+    }
+
+    public void index() throws IOException {
+        index = new HashMap<>();
+
+        // Can be in file, so open stream
+        try (ZipInputStream stream = new ZipInputStream(source.openStream())) {
+            ZipEntry entry;
+            int i = 0;
+            while ((entry = stream.getNextEntry()) != null) {
+                String name = entry.getName().substring(basePath.length());
+                index.put(name, i++);
+            }
+        }
+    }
+
+    private BufferedReader readerOn(InputStream inputStream) {
+        return new BufferedReader(new InputStreamReader(inputStream, charset));
     }
 
     /**
@@ -54,17 +77,15 @@ public class StrDb {
      * @param consumer The consumer to feed with the words.
      * @throws IOException Thrown from the underlying implementations.
      */
-    public void words(Consumer<String> consumer) throws IOException {
-        try (ZipFile zipFile = new ZipFile(file, Charsets.UTF_8)) {
-            Enumeration<? extends ZipEntry> entries = zipFile.entries();
-            while (entries.hasMoreElements()) {
-                ZipEntry entry = entries.nextElement();
-                new ByteSource() {
-                    @Override
-                    public InputStream openStream() throws IOException {
-                        return zipFile.getInputStream(entry);
-                    }
-                }.asCharSource(Charsets.UTF_8).forEachLine(consumer);
+    public void words(final Consumer<String> consumer) throws IOException {
+        try (ZipInputStream stream = new ZipInputStream(source.openStream())) {
+            while (stream.getNextEntry() != null) {
+                BufferedReader reader = readerOn(stream);
+
+                String line;
+                while ((line = reader.readLine()) != null)
+                    consumer.apply(line);
+                ;
             }
         }
     }
@@ -78,22 +99,14 @@ public class StrDb {
      * @throws IOException Thrown from the underlying implementations.
      */
     public <T> T words(LineProcessor<T> processor) throws IOException {
-        try (ZipFile zipFile = new ZipFile(file, Charsets.UTF_8)) {
-            Enumeration<? extends ZipEntry> entries = zipFile.entries();
-            while (entries.hasMoreElements()) {
-                ZipEntry entry = entries.nextElement();
+        try (ZipInputStream stream = new ZipInputStream(source.openStream())) {
+            while (stream.getNextEntry() != null) {
+                BufferedReader reader = readerOn(stream);
 
-                try (BufferedReader reader = new ByteSource() {
-                    @Override
-                    public InputStream openStream() throws IOException {
-                        return zipFile.getInputStream(entry);
-                    }
-                }.asCharSource(Charsets.UTF_8).openBufferedStream()) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (!processor.processLine(line))
-                            return processor.getResult();
-                    }
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!processor.processLine(line))
+                        return processor.getResult();
                 }
             }
         }
@@ -216,62 +229,41 @@ public class StrDb {
      * @throws IOException Thrown from the underlying implementations.
      */
     public String resolve(String word, boolean matchCase) throws IOException {
-        // Open the ZIP file for the items.
-        try (ZipFile zipFile = new ZipFile(file, Charsets.UTF_8)) {
-            if (word.length() < prefixLength) {
-                // If word to check for is shorter than the prefix, use shortnames table.
-                ZipEntry entry = zipFile.getEntry(basePath + ".shortnames");
+        // Index if not yet indexed
+        if (index == null)
+            index();
 
-                // Open reader on the entry
-                try (BufferedReader reader = new ByteSource() {
-                    @Override
-                    public InputStream openStream() throws IOException {
-                        return zipFile.getInputStream(entry);
-                    }
-                }.asCharSource(Charsets.UTF_8).openBufferedStream()) {
-                    // Read all lines, check if word is equal.
-                    String line;
-                    while ((line = reader.readLine()) != null)
-                        if (matchCase) {
-                            if (line.equals(word))
-                                return line;
-                        } else {
-                            if (line.toLowerCase().equals(word.toLowerCase()))
-                                return line;
-                        }
+        // get the prefix of the word
+        String prefix = word.substring(0, prefixLength).toLowerCase();
 
-                    return null;
+        // Find the position of the prefix, if not found, it is not contained
+        Integer position = index.get(prefix);
+        if (position == null)
+            return null;
+
+        // Can be in file, so open stream
+        try (ZipInputStream stream = new ZipInputStream(source.openStream())) {
+            ZipEntry entry = null;
+            // Spool to the correct entry
+            for (int i = 0; i <= position; i++)
+                entry = stream.getNextEntry();
+
+            // Open reader on the position
+            BufferedReader reader = readerOn(stream);
+
+            // Find using rules
+            String line;
+            while ((line = reader.readLine()) != null)
+                if (matchCase) {
+                    if (line.equals(word))
+                        return line;
+                } else {
+                    if (line.toLowerCase().equals(word.toLowerCase()))
+                        return line;
                 }
-            } else {
-                // Get the entry that starts with the prefix of the word
-                ZipEntry entry = zipFile.getEntry(
-                        basePath + word.substring(0, prefixLength).toLowerCase());
 
-                // No file with this prefix, so the word is not in the database.
-                if (entry == null)
-                    return null;
-
-                // Open reader on the entry
-                try (BufferedReader reader = new ByteSource() {
-                    @Override
-                    public InputStream openStream() throws IOException {
-                        return zipFile.getInputStream(entry);
-                    }
-                }.asCharSource(Charsets.UTF_8).openBufferedStream()) {
-                    // Read all lines, check if word is equal.
-                    String line;
-                    while ((line = reader.readLine()) != null)
-                        if (matchCase) {
-                            if (line.equals(word))
-                                return line;
-                        } else {
-                            if (line.toLowerCase().equals(word.toLowerCase()))
-                                return line;
-                        }
-
-                    return null;
-                }
-            }
+            // Not found, return null
+            return null;
         }
     }
 }

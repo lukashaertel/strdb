@@ -243,10 +243,9 @@ public class StrDb {
 
         // Can be in file, so open stream
         try (ZipInputStream stream = new ZipInputStream(source.openStream())) {
-            ZipEntry entry = null;
             // Spool to the correct entry
             for (int i = 0; i <= position; i++)
-                entry = stream.getNextEntry();
+                stream.getNextEntry();
 
             // Open reader on the position
             BufferedReader reader = readerOn(stream);

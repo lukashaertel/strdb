@@ -233,6 +233,12 @@ public class StrDb {
         if (index == null)
             index();
 
+        String wordLower;
+        if (!matchCase)
+            wordLower = word.toLowerCase();
+        else
+            wordLower = null;
+
         // get the prefix of the word
         String prefix = word.substring(0, prefixLength).toLowerCase();
 
@@ -257,7 +263,7 @@ public class StrDb {
                     if (line.equals(word))
                         return line;
                 } else {
-                    if (line.toLowerCase().equals(word.toLowerCase()))
+                    if (line.toLowerCase().equals(wordLower))
                         return line;
                 }
 
